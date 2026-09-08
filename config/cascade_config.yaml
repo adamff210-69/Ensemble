@@ -1,0 +1,66 @@
+# Three-Layer Cascade Ensemble Configuration
+
+system:
+  name: "Cascade-Prompt-Injection-Guard"
+  version: "1.0.0"
+  seed: 42
+  device: "auto"  # "cuda", "cpu", or "auto"
+
+layer1:
+  model_name_or_path: "protectai/deberta-v3-base-prompt-injection-v2"
+  fallback_model: "meta-llama/Llama-Prompt-Guard-2-86M"
+  max_length: 512
+  latency_budget_ms: 50
+  handoff_policy:
+    attack_threshold: 0.85     # prob > 0.85 -> BLOCK
+    benign_threshold: 0.15     # prob < 0.15 -> PASS
+                               # 0.15 <= prob <= 0.85 -> ROUTE_TO_L2
+  training:
+    learning_rate: 2.0e-5
+    weight_decay: 0.01
+    batch_size: 32
+    epochs: 5
+    focal_loss_gamma: 2.0
+    focal_loss_alpha: 0.75
+
+layer2:
+  target_model_name: "google/gemma-2-9b-it"
+  fallback_target_model: "meta-llama/Llama-3.1-8B-Instruct"
+  latency_budget_ms: 100
+  hidden_layers_sampled: 24
+  hidden_dim: 2560
+  mlp_probe:
+    hidden_dims: [512, 256, 128]
+    dropout: 0.3
+    learning_rate: 1.0e-3
+    weight_decay: 1.0e-4
+    epochs: 15
+    batch_size: 64
+  handoff_policy:
+    attack_threshold: 0.80     # prob > 0.80 -> BLOCK
+    benign_threshold: 0.20     # prob < 0.20 -> PASS
+                               # 0.20 <= prob <= 0.80 -> ROUTE_TO_L3
+
+layer3:
+  verifier_model_name: "microsoft/Phi-3-mini-4k-instruct"
+  fallback_verifier_model: "google/gemma-2-9b-it"
+  latency_budget_ms: 150
+  confidence_threshold: 0.70
+  training:
+    lora_r: 8
+    lora_alpha: 16
+    lora_target_modules: ["q_proj", "v_proj"]
+  ensemble_fallback:
+    weights: [0.30, 0.40, 0.30]  # L1, L2, L3 weights
+    decision_threshold: 0.50
+
+datasets:
+  tensor_trust: "tensor_trust_126k"
+  prompt_shield: "prompt_shield_bench"
+  opi: "open_prompt_injection"
+  not_inject: "not_inject_339"
+  pint: "pint_benchmark"
+  split_ratios:
+    train: 0.70
+    val: 0.15
+    test: 0.15
