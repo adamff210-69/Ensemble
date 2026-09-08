@@ -11,6 +11,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 from sklearn.metrics import roc_auc_score, f1_score, precision_score, recall_score
 from ..data.dataset_loader import InjectionDataset, InjectionSample
+from ..device import resolve_device
 
 
 class FocalLoss(nn.Module):
@@ -39,9 +40,9 @@ class Layer1Trainer:
         model: nn.Module,
         learning_rate: float = 2e-5,
         weight_decay: float = 0.01,
-        device: str = "cpu",
+        device: str = "auto",
     ):
-        self.device = torch.device(device)
+        self.device = resolve_device(device)
         self.model = model.to(self.device)
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(), lr=learning_rate, weight_decay=weight_decay

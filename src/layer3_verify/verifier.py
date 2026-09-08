@@ -10,6 +10,8 @@ import re
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
+from ..device import resolve_device
+
 
 @dataclass
 class Layer3Result:
@@ -59,11 +61,11 @@ class Layer3Verifier:
     def __init__(
         self,
         model_name_or_path: str = "microsoft/Phi-3-mini-4k-instruct",
-        device: str = "cpu",
+        device: str = "auto",
         use_surrogate: bool = True,
     ):
         self.model_name_or_path = model_name_or_path
-        self.device = torch.device(device if torch.cuda.is_available() and device != "cpu" else "cpu")
+        self.device = resolve_device(device)
         self.use_surrogate = use_surrogate
 
         self.tokenizer = None
@@ -73,11 +75,14 @@ class Layer3Verifier:
         if not use_surrogate:
             try:
                 self.tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
+                on_gpu = self.device.type == "cuda"
                 self.model = AutoModelForCausalLM.from_pretrained(
                     model_name_or_path,
-                    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-                    device_map="auto" if torch.cuda.is_available() else None,
+                    torch_dtype=torch.float16 if on_gpu else torch.float32,
+                    device_map="auto" if on_gpu else None,
                 )
+                if not on_gpu:
+                    self.model = self.model.to(self.device)
                 self.model.eval()
             except Exception:
                 self.use_surrogate = True
@@ -130,7 +135,8 @@ class Layer3Verifier:
             prompt_text = self.build_verification_prompt(
                 user_prompt, model_response, system_prompt, prob_l1, conf_l1, prob_l2, conf_l2
             )
-            inputs = self.tokenizer(prompt_text, return_tensors="pt", max_length=1024, truncation=True).to(self.device)
+            model_device = next(self.model.parameters()).device
+            inputs = self.tokenizer(prompt_text, return_tensors="pt", max_length=1024, truncation=True).to(model_device)
             with torch.no_grad():
                 outputs = self.model.generate(**inputs, max_new_tokens=60, temperature=0.1)
                 generated = self.tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)

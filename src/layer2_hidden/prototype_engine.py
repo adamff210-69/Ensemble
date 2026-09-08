@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple, Dict, Any
 import torch
 
+from ..device import resolve_device
+
 
 @dataclass
 class PrototypeFeatures:
@@ -23,12 +25,13 @@ class PrototypeFeatures:
 class PrototypeEngine:
     """Computes attack and benign class prototypes and calculates layer-wise representation metrics."""
 
-    def __init__(self, num_layers: int = 24, d_model: int = 2560):
+    def __init__(self, num_layers: int = 24, d_model: int = 2560, device: str = "auto"):
         self.num_layers = num_layers
         self.d_model = d_model
+        self.device = resolve_device(device)
         # Prototypes initialized to zeros until compute_prototypes is invoked
-        self.mu_attack = torch.zeros(num_layers, d_model)
-        self.mu_benign = torch.zeros(num_layers, d_model)
+        self.mu_attack = torch.zeros(num_layers, d_model, device=self.device)
+        self.mu_benign = torch.zeros(num_layers, d_model, device=self.device)
         self.is_fitted = False
 
     def compute_prototypes(
@@ -39,16 +42,16 @@ class PrototypeEngine:
         """Compute mean hidden states for attack and benign classes across all layers."""
         if attack_states:
             stacked_attack = torch.stack(attack_states, dim=0)  # [N_attack, num_layers, d_model]
-            self.mu_attack = stacked_attack.mean(dim=0)
+            self.mu_attack = stacked_attack.mean(dim=0).to(self.device)
 
         if benign_states:
             stacked_benign = torch.stack(benign_states, dim=0)  # [N_benign, num_layers, d_model]
-            self.mu_benign = stacked_benign.mean(dim=0)
+            self.mu_benign = stacked_benign.mean(dim=0).to(self.device)
 
         # Default fallback non-zero initialization if dataset was empty
         if not attack_states or not benign_states:
-            self.mu_attack = torch.ones(self.num_layers, self.d_model) * 0.5
-            self.mu_benign = torch.ones(self.num_layers, self.d_model) * -0.5
+            self.mu_attack = torch.ones(self.num_layers, self.d_model, device=self.device) * 0.5
+            self.mu_benign = torch.ones(self.num_layers, self.d_model, device=self.device) * -0.5
 
         self.is_fitted = True
 
@@ -59,11 +62,15 @@ class PrototypeEngine:
         """
         num_layers, d_model = hidden_matrix.shape
 
+        # Ensure prototypes live on the same device as the incoming hidden states
+        mu_attack = self.mu_attack.to(hidden_matrix.device)
+        mu_benign = self.mu_benign.to(hidden_matrix.device)
+
         # 1. Per-layer attack prototype distance: ||h_l - mu_attack_l||2
-        attack_dists = torch.norm(hidden_matrix - self.mu_attack[:num_layers, :d_model], p=2, dim=1)
+        attack_dists = torch.norm(hidden_matrix - mu_attack[:num_layers, :d_model], p=2, dim=1)
 
         # 2. Per-layer benign prototype distance: ||h_l - mu_benign_l||2
-        benign_dists = torch.norm(hidden_matrix - self.mu_benign[:num_layers, :d_model], p=2, dim=1)
+        benign_dists = torch.norm(hidden_matrix - mu_benign[:num_layers, :d_model], p=2, dim=1)
 
         # 3. Layer-wise divergence score: (distance_to_attack - distance_to_benign)
         divergence = attack_dists - benign_dists

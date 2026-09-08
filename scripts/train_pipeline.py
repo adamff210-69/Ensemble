@@ -15,17 +15,20 @@ from src.layer1_fast.trainer import Layer1Trainer
 from src.layer2_hidden.hidden_extractor import TargetLLMHiddenExtractor
 from src.layer2_hidden.prototype_engine import PrototypeEngine
 from src.layer2_hidden.trainer import Layer2Trainer
+from src.device import resolve_device, load_system_device, device_summary
 
 
 def main():
     print("=== Training Three-Layer Cascade Models ===")
+    device = resolve_device(load_system_device())
+    print(f"Compute device: {device} ({device_summary()})")
     dataset = SyntheticDataGenerator.get_dataset(n_attacks=150, n_benign=150, n_not_inject=50, seed=42)
     print(f"Loaded dataset with {len(dataset)} total samples.")
 
     # 1. Train Layer 1 Detector
     print("\n--- Training Layer 1 Fast Pre-filter ---")
-    l1_detector = Layer1Detector(use_surrogate=True)
-    l1_trainer = Layer1Trainer(model=l1_detector.surrogate_model)
+    l1_detector = Layer1Detector(device=str(device), use_surrogate=True)
+    l1_trainer = Layer1Trainer(model=l1_detector.surrogate_model, device=str(device))
     l1_loss = l1_trainer.train_epoch(dataset, batch_size=32)
     l1_metrics = l1_trainer.evaluate(dataset)
     print(f"Layer 1 Training Loss: {l1_loss:.4f}")
@@ -33,9 +36,9 @@ def main():
 
     # 2. Train Layer 2 MLP Probe & Compute Prototypes
     print("\n--- Training Layer 2 Hidden State MLP Probe ---")
-    extractor = TargetLLMHiddenExtractor(use_surrogate=True)
-    proto_engine = PrototypeEngine(num_layers=extractor.num_layers, d_model=extractor.d_model)
-    l2_trainer = Layer2Trainer(extractor=extractor, prototype_engine=proto_engine)
+    extractor = TargetLLMHiddenExtractor(device=str(device), use_surrogate=True)
+    proto_engine = PrototypeEngine(num_layers=extractor.num_layers, d_model=extractor.d_model, device=str(device))
+    l2_trainer = Layer2Trainer(extractor=extractor, prototype_engine=proto_engine, device=str(device))
 
     print("Fitting prototypes and building feature vectors...")
     X, y = l2_trainer.fit_prototypes_and_prepare_features(dataset)

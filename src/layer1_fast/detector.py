@@ -12,6 +12,8 @@ import torch
 import torch.nn as nn
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
+from ..device import resolve_device
+
 
 @dataclass
 class Layer1Result:
@@ -61,11 +63,11 @@ class Layer1Detector:
     def __init__(
         self,
         model_name_or_path: str = "protectai/deberta-v3-base-prompt-injection-v2",
-        device: str = "cpu",
+        device: str = "auto",
         use_surrogate: bool = False,
     ):
         self.model_name_or_path = model_name_or_path
-        self.device = torch.device(device if torch.cuda.is_available() and device != "cpu" else "cpu")
+        self.device = resolve_device(device)
         self.use_surrogate = use_surrogate
 
         self.tokenizer = None

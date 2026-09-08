@@ -14,6 +14,7 @@ from ..layer2_hidden.prototype_engine import PrototypeEngine
 from ..layer2_hidden.mlp_probe import Layer2Analyzer
 from ..layer3_verify.verifier import Layer3Verifier
 from ..cascade.engine import ThreeLayerCascadeEngine, CascadePrediction
+from ..device import resolve_device, load_system_device, device_summary
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -27,14 +28,25 @@ _engine: Optional[ThreeLayerCascadeEngine] = None
 
 
 def get_engine() -> ThreeLayerCascadeEngine:
-    """Lazy initializer for global cascade engine."""
+    """
+    Lazy initializer for global cascade engine.
+
+    All components share one compute device resolved from
+    `system.device` in config/cascade_config.yaml ("auto" | "cuda" | "mps" |
+    "cpu"), so the whole pipeline runs on GPU when one is available.
+    """
     global _engine
     if _engine is None:
-        l1 = Layer1Detector(use_surrogate=True)
-        extractor = TargetLLMHiddenExtractor(use_surrogate=True)
-        proto = PrototypeEngine(num_layers=extractor.num_layers, d_model=extractor.d_model)
-        l2 = Layer2Analyzer(extractor, proto)
-        l3 = Layer3Verifier(use_surrogate=True)
+        device = resolve_device(load_system_device())
+        print(f"[api] Compute device: {device} ({device_summary()})")
+
+        l1 = Layer1Detector(device=str(device), use_surrogate=True)
+        extractor = TargetLLMHiddenExtractor(device=str(device), use_surrogate=True)
+        proto = PrototypeEngine(
+            num_layers=extractor.num_layers, d_model=extractor.d_model, device=str(device)
+        )
+        l2 = Layer2Analyzer(extractor, proto, device=str(device))
+        l3 = Layer3Verifier(device=str(device), use_surrogate=True)
         _engine = ThreeLayerCascadeEngine(l1_detector=l1, l2_analyzer=l2, l3_verifier=l3)
     return _engine
 
@@ -76,6 +88,8 @@ def health_check():
         "status": "healthy",
         "engine": "ThreeLayerCascadeEngine",
         "version": "1.0.0",
+        "device": str(engine.l1.device),
+        "device_info": device_summary(),
     }
 
 

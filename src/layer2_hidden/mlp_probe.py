@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 from .hidden_extractor import TargetLLMHiddenExtractor
 from .prototype_engine import PrototypeEngine, PrototypeFeatures
+from ..device import resolve_device
 
 
 @dataclass
@@ -62,11 +63,11 @@ class Layer2Analyzer:
         extractor: TargetLLMHiddenExtractor,
         prototype_engine: PrototypeEngine,
         probe: Optional[Layer2MLPProbe] = None,
-        device: str = "cpu",
+        device: str = "auto",
     ):
         self.extractor = extractor
         self.prototype_engine = prototype_engine
-        self.device = torch.device(device)
+        self.device = resolve_device(device)
 
         # Estimate feature dimension: 4 * num_layers - 1
         num_layers = extractor.num_layers

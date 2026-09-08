@@ -10,6 +10,8 @@ import torch
 import torch.nn as nn
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
+from ..device import resolve_device
+
 
 @dataclass
 class HiddenStateOutput:
@@ -53,12 +55,12 @@ class TargetLLMHiddenExtractor:
         model_name_or_path: str = "google/gemma-2-9b-it",
         num_layers: int = 24,
         d_model: int = 2560,
-        device: str = "cpu",
+        device: str = "auto",
         use_surrogate: bool = True,
     ):
         self.num_layers = num_layers
         self.d_model = d_model
-        self.device = torch.device(device if torch.cuda.is_available() and device != "cpu" else "cpu")
+        self.device = resolve_device(device)
         self.use_surrogate = use_surrogate
 
         self.tokenizer = None
@@ -68,12 +70,16 @@ class TargetLLMHiddenExtractor:
         if not use_surrogate:
             try:
                 self.tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
+                on_gpu = self.device.type == "cuda"
                 self.model = AutoModelForCausalLM.from_pretrained(
                     model_name_or_path,
                     output_hidden_states=True,
-                    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-                    device_map="auto" if torch.cuda.is_available() else None,
+                    torch_dtype=torch.float16 if on_gpu else torch.float32,
+                    # Large models are sharded across GPUs; small devices keep a single copy
+                    device_map="auto" if on_gpu else None,
                 )
+                if not on_gpu:
+                    self.model = self.model.to(self.device)
                 self.model.eval()
             except Exception:
                 self.use_surrogate = True
@@ -83,13 +89,16 @@ class TargetLLMHiddenExtractor:
         start_time = time.perf_counter()
 
         if not self.use_surrogate and self.model is not None and self.tokenizer is not None:
-            inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512).to(self.device)
+            # With device_map="auto" the embedding layer sits on the first GPU shard
+            model_device = next(self.model.parameters()).device
+            inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512).to(model_device)
             with torch.no_grad():
                 outputs = self.model(**inputs, output_hidden_states=True)
                 # outputs.hidden_states is a tuple of (num_layers + 1) tensors of shape [batch, seq_len, d_model]
                 hidden_states_tuple = outputs.hidden_states[1:]  # Exclude embedding layer
-                last_token_states = [h[0, -1, :].cpu() for h in hidden_states_tuple]
-                hidden_matrix = torch.stack(last_token_states, dim=0)
+                # Keep last-token states on the model device (GPU) to avoid CPU<->GPU copies
+                last_token_states = [h[0, -1, :].detach() for h in hidden_states_tuple]
+                hidden_matrix = torch.stack(last_token_states, dim=0).to(self.device)
         else:
             hidden_matrix = self.surrogate.extract_hidden_states(prompt, is_attack_hint=is_attack_hint)
 

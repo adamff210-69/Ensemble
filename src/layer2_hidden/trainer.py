@@ -14,6 +14,7 @@ from .mlp_probe import Layer2MLPProbe
 from .prototype_engine import PrototypeEngine
 from .hidden_extractor import TargetLLMHiddenExtractor
 from ..data.dataset_loader import InjectionDataset
+from ..device import resolve_device
 
 
 class Layer2Trainer:
@@ -25,9 +26,9 @@ class Layer2Trainer:
         prototype_engine: PrototypeEngine,
         learning_rate: float = 1e-3,
         weight_decay: float = 1e-4,
-        device: str = "cpu",
+        device: str = "auto",
     ):
-        self.device = torch.device(device)
+        self.device = resolve_device(device)
         self.extractor = extractor
         self.prototype_engine = prototype_engine
 

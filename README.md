@@ -92,6 +92,23 @@ d:/ensemble/
 
 ---
 
+## GPU / Device Selection
+
+All components (L1 detector, L2 extractor + prototypes + probe, L3 verifier, trainers, API) share one compute device resolved by `src/device.py`:
+
+| `system.device` (in `config/cascade_config.yaml`) | Behavior |
+|---|---|
+| `auto` (default) | CUDA if a GPU is available → MPS (Apple Silicon) → CPU |
+| `cuda` | Use the GPU; **fails fast** with a clear error if no GPU is found |
+| `mps` | Use the Apple Metal backend |
+| `cpu` | Force CPU |
+
+- Real HuggingFace models load in **fp16 on GPU** (`device_map="auto"` shards models larger than one GPU across multiple GPUs).
+- Surrogate models also run on the resolved device, so the full pipeline (training, ablations, API) uses the GPU end-to-end.
+- `GET /v1/health` reports the active device; the CLI scripts print it at startup.
+
+---
+
 ## Quick Start
 
 ### 1. Install Dependencies

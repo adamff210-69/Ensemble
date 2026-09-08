@@ -16,6 +16,7 @@ from src.layer3_verify.verifier import Layer3Verifier
 from src.cascade.engine import ThreeLayerCascadeEngine
 from src.evaluation.ablations import AblationStudyRunner
 from src.evaluation.statistical import StatisticalSignificanceTest
+from src.device import resolve_device, load_system_device, device_summary
 
 
 def main():
@@ -23,15 +24,18 @@ def main():
     print("      RESEARCH ABLATION STUDY: THREE-LAYER CASCADE ENSEMBLE SYSTEM")
     print("==========================================================================")
 
+    device = resolve_device(load_system_device())
+    print(f"Compute device: {device} ({device_summary()})")
+
     dataset = SyntheticDataGenerator.get_dataset(
         n_attacks=200, n_benign=200, n_not_inject=100, seed=42
     )
     print(f"Evaluation Dataset Loaded: {len(dataset)} samples (200 attacks, 200 benign, 100 NotInject).")
 
-    # Initialize Engine Components
-    l1 = Layer1Detector(use_surrogate=True)
-    extractor = TargetLLMHiddenExtractor(use_surrogate=True)
-    proto = PrototypeEngine(num_layers=extractor.num_layers, d_model=extractor.d_model)
+    # Initialize Engine Components (all share the same compute device)
+    l1 = Layer1Detector(device=str(device), use_surrogate=True)
+    extractor = TargetLLMHiddenExtractor(device=str(device), use_surrogate=True)
+    proto = PrototypeEngine(num_layers=extractor.num_layers, d_model=extractor.d_model, device=str(device))
 
     # Initialize prototypes with synthetic states
     attack_samples = [s for s in dataset.samples if s.label == 1][:30]
@@ -41,8 +45,8 @@ def main():
         [extractor.extract(s.prompt, is_attack_hint=False).hidden_states for s in benign_samples],
     )
 
-    l2 = Layer2Analyzer(extractor, proto)
-    l3 = Layer3Verifier(use_surrogate=True)
+    l2 = Layer2Analyzer(extractor, proto, device=str(device))
+    l3 = Layer3Verifier(device=str(device), use_surrogate=True)
     engine = ThreeLayerCascadeEngine(l1_detector=l1, l2_analyzer=l2, l3_verifier=l3)
 
     # Run Ablation Matrix
