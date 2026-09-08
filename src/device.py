@@ -29,7 +29,10 @@ def resolve_device(preferred: Optional[str] = "auto") -> torch.device:
 
     if pref in ("auto", ""):
         if torch.cuda.is_available():
-            return torch.device("cuda")
+            # Normalize to a concrete index: torch.device("cuda") (index=None)
+            # is NOT == torch.device("cuda:0"), even though tensors always
+            # report the concrete index.
+            return torch.device("cuda", torch.cuda.current_device())
         if torch.backends.mps.is_available():
             return torch.device("mps")
         return torch.device("cpu")
@@ -40,7 +43,7 @@ def resolve_device(preferred: Optional[str] = "auto") -> torch.device:
                 "CUDA was requested but no GPU is available. "
                 "Install a CUDA-enabled build of PyTorch and verify with `nvidia-smi`."
             )
-        return torch.device("cuda")
+        return torch.device("cuda", torch.cuda.current_device())
 
     if pref == "mps":
         if not torch.backends.mps.is_available():
