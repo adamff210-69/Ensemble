@@ -42,3 +42,24 @@ def test_mcnemar_test():
     res = StatisticalSignificanceTest.mcnemar_test(preds_a, preds_b, targets)
     assert "statistic" in res
     assert "p_value" in res
+
+
+def test_ablation_runner_stores_predictions():
+    """Significance tests must reuse the table's own per-sample predictions,
+    not re-run the (stochastic) pipeline."""
+    dataset = SyntheticDataGenerator.get_dataset(n_attacks=10, n_benign=10, n_not_inject=5)
+    l1 = Layer1Detector(use_surrogate=True)
+    extractor = TargetLLMHiddenExtractor(use_surrogate=True)
+    proto = PrototypeEngine(num_layers=extractor.num_layers, d_model=extractor.d_model)
+    l2 = Layer2Analyzer(extractor, proto)
+    l3 = Layer3Verifier(use_surrogate=True)
+    engine = ThreeLayerCascadeEngine(l1, l2, l3)
+
+    runner = AblationStudyRunner(engine)
+    results = runner.run_ablations(dataset)
+
+    assert set(results.keys()) == set(runner.CONFIGS.keys())
+    for code in runner.CONFIGS:
+        stored = runner.get_predictions(code)
+        assert len(stored) == len(dataset.samples)
+        assert set(stored) <= {0, 1}

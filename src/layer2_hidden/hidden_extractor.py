@@ -23,7 +23,37 @@ class HiddenStateOutput:
 
 
 class SurrogateTargetLLM(nn.Module):
-    """Surrogate target LLM generator for fast, reproducible local testing."""
+    """Surrogate target LLM generator for fast, reproducible local testing.
+
+    The synthetic representation is derived from the PROMPT TEXT, never from
+    a ground-truth label — mirroring the fact that a real target LLM's hidden
+    states reflect what the prompt contains. Feeding the label here would leak
+    ground truth into the features (the probe would train to AUROC 1.0 and
+    fail on unseen data).
+    """
+
+    # Weighted lexicon of attack-cue phrasings; stand-in for the attack-ness
+    # that a real encoder's representation would capture from the text.
+    #
+    # STRONG cues are unambiguously adversarial in a user prompt and drive the
+    # signal on their own. WEAK cues are domain words (password, root, admin...)
+    # that also appear in legitimate sysadmin/development questions (NotInject
+    # style) — each one only nudges the signal, so benign prompts like
+    # "How do I reset a lost root password on Ubuntu?" do not saturate it.
+    STRONG_CUES = (
+        "ignore all previous instructions", "ignore previous instructions",
+        "ignore prior instructions", "disregard", "override", "bypass",
+        "jailbreak", "sudo mode", "developer mode", "dan mode",
+        "system override", "instruction override", "emergency override",
+        "do anything now",
+    )
+    WEAK_CUES = (
+        "reveal", "secret", "admin", "password", "credential", "root",
+        "private key", "access log", "safety filter", "content policy",
+        "system prompt", "internal", "injection",
+    )
+    STRONG_WEIGHT = 0.5
+    WEAK_WEIGHT = 0.15
 
     def __init__(self, num_layers: int = 24, d_model: int = 2560):
         super().__init__()
@@ -32,18 +62,35 @@ class SurrogateTargetLLM(nn.Module):
         # Synthetic embedding weights
         self.proj = nn.Linear(1, d_model)
 
-    def extract_hidden_states(self, prompt: str, is_attack_hint: bool = False) -> torch.Tensor:
-        """Generate synthetic hidden state trajectory across layers [num_layers, d_model]."""
+    def attack_signal(self, prompt: str) -> float:
+        """Estimate attack-ness of the prompt text in [0, 1] (no labels)."""
+        p = prompt.lower()
+        strong = sum(1 for cue in self.STRONG_CUES if cue in p)
+        weak = sum(1 for cue in self.WEAK_CUES if cue in p)
+        return min(1.0, strong * self.STRONG_WEIGHT + weak * self.WEAK_WEIGHT)
+
+    def extract_hidden_states(
+        self, prompt: str, attack_hint: Optional[float] = None
+    ) -> torch.Tensor:
+        """Generate synthetic hidden state trajectory across layers [num_layers, d_model].
+
+        attack_hint: explicit 0..1 override (e.g. a soft upstream-layer score).
+        None (default): derive the signal from the prompt text itself.
+        """
         # Allocate on the device the module actually lives on (torch.randn
         # defaults to CPU otherwise, even after the module was .to(cuda))
         device = self.proj.weight.device
         seed_val = sum(ord(c) for c in prompt[:50]) % 1000 / 1000.0
+        if attack_hint is None:
+            signal = self.attack_signal(prompt)
+        else:
+            signal = min(1.0, max(0.0, float(attack_hint)))
         layers = []
         base_vec = torch.randn(self.d_model, device=device) * 0.1
 
         for l in range(self.num_layers):
-            # Layer dynamics: attack prompts exhibit larger trajectory drift in late layers
-            drift = (l / self.num_layers) ** 2.0 * (1.5 if is_attack_hint else 0.2)
+            # Layer dynamics: attack-like prompts exhibit larger trajectory drift in late layers
+            drift = (l / self.num_layers) ** 2.0 * (0.2 + 1.3 * signal)
             layer_state = base_vec + torch.randn(self.d_model, device=device) * 0.05 + drift + seed_val
             layers.append(layer_state)
 
@@ -87,8 +134,14 @@ class TargetLLMHiddenExtractor:
             except Exception:
                 self.use_surrogate = True
 
-    def extract(self, prompt: str, is_attack_hint: bool = False) -> HiddenStateOutput:
-        """Extract last-token hidden state per layer across all layers N."""
+    def extract(self, prompt: str, attack_hint: Optional[float] = None) -> HiddenStateOutput:
+        """Extract last-token hidden state per layer across all layers N.
+
+        attack_hint: surrogate-only override for the synthetic representation's
+        attack-ness (0..1). None (default): derived from the prompt text.
+        The real-model path always ignores this — its representation comes
+        from the model itself.
+        """
         start_time = time.perf_counter()
 
         if not self.use_surrogate and self.model is not None and self.tokenizer is not None:
@@ -103,7 +156,7 @@ class TargetLLMHiddenExtractor:
                 last_token_states = [h[0, -1, :].detach() for h in hidden_states_tuple]
                 hidden_matrix = torch.stack(last_token_states, dim=0).to(self.device)
         else:
-            hidden_matrix = self.surrogate.extract_hidden_states(prompt, is_attack_hint=is_attack_hint)
+            hidden_matrix = self.surrogate.extract_hidden_states(prompt, attack_hint=attack_hint)
 
         extraction_time_ms = (time.perf_counter() - start_time) * 1000.0
 

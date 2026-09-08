@@ -26,13 +26,20 @@ class AblationStudyRunner:
 
     def __init__(self, engine: ThreeLayerCascadeEngine):
         self.engine = engine
+        # Per-sample binary predictions (1 = BLOCK) from the most recent
+        # run_ablations() call, keyed by config code. Significance tests MUST
+        # use these — re-running a stochastic pipeline for comparison would
+        # test predictions that are not the ones reported in the table.
+        self.predictions: Dict[str, List[int]] = {}
 
     def run_ablations(self, dataset: InjectionDataset) -> Dict[str, PerformanceMetrics]:
         """Run evaluation over all ablation configurations A1 to A7."""
         results: Dict[str, PerformanceMetrics] = {}
+        self.predictions = {}
 
         for code in sorted(self.CONFIGS.keys()):
             predictions: List[CascadePrediction] = []
+            binary: List[int] = []
             for sample in dataset.samples:
                 pred = self.engine.predict(
                     user_prompt=sample.prompt,
@@ -41,11 +48,15 @@ class AblationStudyRunner:
                     config_name=code,
                 )
                 predictions.append(pred)
-
-            metrics = Evaluator.evaluate_predictions(predictions, dataset)
-            results[code] = metrics
+                binary.append(1 if pred.final_action == "BLOCK" else 0)
+            results[code] = Evaluator.evaluate_predictions(predictions, dataset)
+            self.predictions[code] = binary
 
         return results
+
+    def get_predictions(self, code: str) -> List[int]:
+        """Per-sample binary predictions from the last run for one config."""
+        return self.predictions.get(code, [])
 
     def generate_report_table(self, results: Dict[str, PerformanceMetrics]) -> str:
         """Generate formatted Markdown research summary table of ablation results."""

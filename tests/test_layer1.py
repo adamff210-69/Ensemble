@@ -29,6 +29,18 @@ def test_layer1_benign_prompt():
     assert len(res.trigger_flags) == 0
 
 
+def test_tokenization_is_process_stable():
+    """Regression: abs(hash(w)) is salted per Python process (PYTHONHASHSEED),
+    which made trained surrogate weights non-reproducible. CRC32 is stable."""
+    import zlib
+    from src.data.tokens import stable_token_index
+
+    word = "attack"
+    assert stable_token_index(word) == zlib.crc32(word.encode("utf-8")) % 10000
+    assert stable_token_index("Attack") == stable_token_index("attack")
+    assert 0 <= stable_token_index("attack") < 10000
+
+
 def test_layer1_trainer():
     dataset = SyntheticDataGenerator.get_dataset(n_attacks=10, n_benign=10, n_not_inject=5)
     detector = Layer1Detector(use_surrogate=True)

@@ -153,9 +153,11 @@ class ThreeLayerCascadeEngine:
                 final_prob = res_l1.prob_attack
                 decision_layer = "Layer1"
             else:
-                # Step 2: Route to Layer 2
+                # Step 2: Route to Layer 2 (independent of L1: its
+                # representation is derived from the prompt content, not
+                # from L1's verdict)
                 layers_evaluated.append("Layer2")
-                res_l2 = self.l2.predict(user_prompt, is_attack_hint=(res_l1.prob_attack > 0.5))
+                res_l2 = self.l2.predict(user_prompt)
                 l2_action = self.policy.evaluate_layer2(res_l2.prob_attack_hidden)
                 res_l2.action = l2_action.value
 

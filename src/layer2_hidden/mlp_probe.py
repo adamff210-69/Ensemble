@@ -76,11 +76,11 @@ class Layer2Analyzer:
         self.probe = probe or Layer2MLPProbe(input_dim=feature_dim).to(self.device)
         self.probe.eval()
 
-    def predict(self, prompt: str, is_attack_hint: bool = False) -> Layer2Result:
+    def predict(self, prompt: str, attack_hint: Optional[float] = None) -> Layer2Result:
         """Run hidden-state extraction, prototype feature computation, and MLP probe classification."""
         start_time = time.perf_counter()
 
-        hidden_output = self.extractor.extract(prompt, is_attack_hint=is_attack_hint)
+        hidden_output = self.extractor.extract(prompt, attack_hint=attack_hint)
         features = self.prototype_engine.extract_features(hidden_output.hidden_states)
 
         feat_tensor = features.feature_vector.unsqueeze(0).to(self.device)

@@ -13,6 +13,7 @@ import torch.nn as nn
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 from ..device import resolve_device
+from ..data.tokens import stable_token_index
 
 
 @dataclass
@@ -114,7 +115,7 @@ class Layer1Detector:
                 prob_attack = probs[0, 1].item() if probs.shape[-1] > 1 else torch.sigmoid(logits[0, 0]).item()
         else:
             # Fast surrogate scoring (Heuristic + lightweight embed score)
-            words = [abs(hash(w)) % 10000 for w in prompt.lower().split()]
+            words = [stable_token_index(w) for w in prompt.lower().split()]
             if not words:
                 words = [0]
             indices_tensor = torch.tensor([words], dtype=torch.long).to(self.device)

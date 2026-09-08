@@ -7,7 +7,7 @@ A research-grade implementation of a sequential three-layer cascade ensemble arc
 | Layer | Function | Latency Budget | Accuracy Target | Model Selection |
 |---|---|---|---|---|
 | **Layer 1** | Lightweight LLM for fast detection of common injections | `<50ms` | `>85%` recall | `protectai/deberta-v3-base-prompt-injection-v2` / `Llama-Prompt-Guard-2-86M` |
-| **Layer 2** | Hidden-state representation analysis on target LLM | `<100ms` | `>90%` precision | `google/gemma-2-9b-it` / `Llama-3.1-8B-Instruct` + 12.6M MLP Probe |
+| **Layer 2** | Hidden-state representation analysis on target LLM | `<100ms` | `>90%` precision | `google/gemma-2-9b-it` / `Llama-3.1-8B-Instruct` + ~215K-param MLP Probe on 95-dim prototype features |
 | **Layer 3** | Output-verification lightweight LLM | `<150ms` | `>95%` specificity | `microsoft/Phi-3-mini-4k-instruct` / `gemma-2-9b-it` |
 
 ```
@@ -83,7 +83,8 @@ d:/ensemble/
 │       └── server.py               # Production FastAPI service (/v1/detect, /v1/detect/batch)
 ├── scripts/
 │   ├── train_pipeline.py           # CLI script to train models
-│   └── run_ablations.py           # CLI script to execute full ablation study matrix A1-A7
+│   ├── run_ablations.py           # CLI script to execute full ablation study matrix A1-A7
+│   └── trace_cascade.py           # Per-sample decision-path audit: where config X flips config Y
 ├── tests/                          # Full pytest test suite
 ├── requirements.txt
 ├── pytest.ini
@@ -143,6 +144,28 @@ curl -X POST "http://localhost:8000/v1/detect" \
 ```
 
 ---
+
+## Ablation Methodology (Study Integrity)
+
+- **No label leakage into features.** Layer-2 feature extraction is label-free:
+  the surrogate target LLM derives its representation from prompt *content*
+  (weighted attack-cue lexicon), never from the ground-truth label. The probe
+  therefore genuinely generalizes (see A2 AUROC in the ablation run).
+- **Disjoint fit/eval split.** `run_ablations.py` fits prototypes and trains the
+  probe on a dedicated dataset (seed=7) that never overlaps the evaluation
+  dataset (seed=42).
+- **Significance on the table's own predictions.** McNemar's test uses the
+  per-sample predictions stored by `AblationStudyRunner` — never a stochastic
+  re-run of the pipeline.
+- **Realistic synthetic responses.** Attack samples carry diverse, realistic
+  model responses (explicit compromise *and* subtle compliance); no oracle
+  strings like "INJECTION DETECTED" leak the label into Layer 3.
+- **Reproducible.** Global torch seed fixed; tokenization uses stable CRC32
+  indices (Python's `hash()` is salted per process and would break
+  reproducibility).
+- **Decision-path audit.** `python scripts/trace_cascade.py A5 A7` reports
+  every sample where two configs disagree, with the full L1→L2→L3→Ensemble
+  path for each flip.
 
 ## Ablation Matrix
 

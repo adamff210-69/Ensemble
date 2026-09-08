@@ -52,9 +52,11 @@ class Layer2Trainer:
         labels = []
 
         for sample in dataset.samples:
-            is_attack = sample.label == 1
-            hidden_out = self.extractor.extract(sample.prompt, is_attack_hint=is_attack)
-            if is_attack:
+            # Label-free extraction: the representation must come from the
+            # prompt content, never from the ground-truth label (leaking the
+            # label into features makes the probe perfectly fit and blind).
+            hidden_out = self.extractor.extract(sample.prompt)
+            if sample.label == 1:
                 attack_states.append(hidden_out.hidden_states)
             else:
                 benign_states.append(hidden_out.hidden_states)

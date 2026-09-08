@@ -11,6 +11,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 from sklearn.metrics import roc_auc_score, f1_score, precision_score, recall_score
 from ..data.dataset_loader import InjectionDataset, InjectionSample
+from ..data.tokens import stable_token_index
 from ..device import resolve_device
 
 
@@ -75,7 +76,7 @@ class Layer1Trainer:
             max_len = max(1, max_len)
             padded_indices = []
             for p in prompts:
-                words = [abs(hash(w)) % 10000 for w in p.lower().split()]
+                words = [stable_token_index(w) for w in p.lower().split()]
                 if not words:
                     words = [0]
                 words = words + [0] * (max_len - len(words))
@@ -104,7 +105,7 @@ class Layer1Trainer:
 
         with torch.no_grad():
             for s in dataset.samples:
-                words = [abs(hash(w)) % 10000 for w in s.prompt.lower().split()]
+                words = [stable_token_index(w) for w in s.prompt.lower().split()]
                 if not words:
                     words = [0]
                 indices_tensor = torch.tensor([words], dtype=torch.long).to(self.device)
