@@ -8,8 +8,8 @@ __pycache__/
 .venv/
 venv/
 
-# Models & data artifacts
-data/
+# Models & data artifacts (root-level only — NOT src/data/, which is a package)
+/data/
 *.pt
 *.bin
 *.safetensors
