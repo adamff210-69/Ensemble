@@ -34,14 +34,17 @@ class SurrogateTargetLLM(nn.Module):
 
     def extract_hidden_states(self, prompt: str, is_attack_hint: bool = False) -> torch.Tensor:
         """Generate synthetic hidden state trajectory across layers [num_layers, d_model]."""
+        # Allocate on the device the module actually lives on (torch.randn
+        # defaults to CPU otherwise, even after the module was .to(cuda))
+        device = self.proj.weight.device
         seed_val = sum(ord(c) for c in prompt[:50]) % 1000 / 1000.0
         layers = []
-        base_vec = torch.randn(self.d_model) * 0.1
+        base_vec = torch.randn(self.d_model, device=device) * 0.1
 
         for l in range(self.num_layers):
             # Layer dynamics: attack prompts exhibit larger trajectory drift in late layers
             drift = (l / self.num_layers) ** 2.0 * (1.5 if is_attack_hint else 0.2)
-            layer_state = base_vec + torch.randn(self.d_model) * 0.05 + drift + seed_val
+            layer_state = base_vec + torch.randn(self.d_model, device=device) * 0.05 + drift + seed_val
             layers.append(layer_state)
 
         return torch.stack(layers, dim=0)  # shape: [num_layers, d_model]
