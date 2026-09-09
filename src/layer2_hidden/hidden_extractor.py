@@ -6,6 +6,7 @@ Extracts last-token hidden states across all model layers N for prompt injection
 from dataclasses import dataclass
 from typing import Optional, Tuple, List
 import time
+import zlib
 import torch
 import torch.nn as nn
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -76,22 +77,36 @@ class SurrogateTargetLLM(nn.Module):
 
         attack_hint: explicit 0..1 override (e.g. a soft upstream-layer score).
         None (default): derive the signal from the prompt text itself.
+
+        The pseudo-random component is SEEDED BY THE PROMPT: a real target LLM
+        is deterministic in (weights, input), so the same prompt must always
+        yield the same representation. Unseeded noise made the whole pipeline
+        stochastic, so re-runs (ablation table vs trace vs significance test)
+        disagreed on knife-edge samples.
         """
         # Allocate on the device the module actually lives on (torch.randn
         # defaults to CPU otherwise, even after the module was .to(cuda))
         device = self.proj.weight.device
+        generator = torch.Generator(device=device).manual_seed(
+            zlib.crc32(prompt.encode("utf-8"))
+        )
         seed_val = sum(ord(c) for c in prompt[:50]) % 1000 / 1000.0
         if attack_hint is None:
             signal = self.attack_signal(prompt)
         else:
             signal = min(1.0, max(0.0, float(attack_hint)))
         layers = []
-        base_vec = torch.randn(self.d_model, device=device) * 0.1
+        base_vec = torch.randn(self.d_model, generator=generator, device=device) * 0.1
 
         for l in range(self.num_layers):
             # Layer dynamics: attack-like prompts exhibit larger trajectory drift in late layers
             drift = (l / self.num_layers) ** 2.0 * (0.2 + 1.3 * signal)
-            layer_state = base_vec + torch.randn(self.d_model, device=device) * 0.05 + drift + seed_val
+            layer_state = (
+                base_vec
+                + torch.randn(self.d_model, generator=generator, device=device) * 0.05
+                + drift
+                + seed_val
+            )
             layers.append(layer_state)
 
         return torch.stack(layers, dim=0)  # shape: [num_layers, d_model]

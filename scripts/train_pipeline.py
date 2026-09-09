@@ -26,13 +26,19 @@ def main():
     print(f"Loaded dataset with {len(dataset)} total samples.")
 
     # 1. Train Layer 1 Detector
-    print("\n--- Training Layer 1 Fast Pre-filter ---")
+    # NOTE: this trains the toy surrogate ENCODER only (a few hundred k params,
+    # average-pooled hashed tokens) — a demonstration of the trainer, NOT the
+    # A1 ablation baseline (that is deliberately the untrained regex-boosted
+    # heuristic, which is what actually pre-filters in the cascade). Metrics
+    # are computed on the training set after 5 passes.
+    print("\n--- Training Layer 1 Fast Pre-filter (surrogate encoder demo, 5 epochs) ---")
     l1_detector = Layer1Detector(device=str(device), use_surrogate=True)
     l1_trainer = Layer1Trainer(model=l1_detector.surrogate_model, device=str(device))
-    l1_loss = l1_trainer.train_epoch(dataset, batch_size=32)
+    for epoch in range(1, 6):
+        loss = l1_trainer.train_epoch(dataset, batch_size=32)
+        print(f"  epoch {epoch}: loss {loss:.4f}")
     l1_metrics = l1_trainer.evaluate(dataset)
-    print(f"Layer 1 Training Loss: {l1_loss:.4f}")
-    print(f"Layer 1 Validation Metrics: {l1_metrics}")
+    print(f"Layer 1 Train-Set Metrics (demo only): {l1_metrics}")
 
     # 2. Train Layer 2 MLP Probe & Compute Prototypes
     print("\n--- Training Layer 2 Hidden State MLP Probe ---")
